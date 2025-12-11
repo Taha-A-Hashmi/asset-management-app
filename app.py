@@ -1,20 +1,16 @@
+import os  
 from flask import Flask, render_template, request, redirect, url_for
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
 app = Flask(__name__)
 
-# --- CONFIGURATION (Hardcoded for Speed) ---
-# Your specific Cloud MongoDB Atlas URI
-MONGO_URI = "mongodb+srv://taha_admin:hospital123@cluster0.ukoxtzf.mongodb.net/hospital_crm_db?retryWrites=true&w=majority&appName=Cluster0&authSource=admin"
+# --- CONFIGURATION ---
+mongo_uri = os.environ.get("MONGO_URI", "mongodb+srv://taha_admin:hospital123@cluster0.ukoxtzf.mongodb.net/hospital_crm_db?retryWrites=true&w=majority&appName=Cluster0&authSource=admin")
 
-# Connect to the Cloud Database
-client = MongoClient(MONGO_URI)
-
-# The URI points to 'hospital_crm_db', so we use that.
+client = MongoClient(mongo_uri)
 db = client['hospital_crm_db']
 assets_collection = db['assets']
-
 # --- ROUTES ---
 
 @app.route('/')
