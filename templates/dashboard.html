@@ -1,27 +1,61 @@
 {% extends "layout.html" %}
+
 {% block content %}
 
 <div class="row mb-4">
     <div class="col-md-8">
-        <div class="row g-3">
-            <div class="col-md-4"><div class="card bg-primary text-white text-center p-3"><h3>{{ total }}</h3><p>Total Assets</p></div></div>
-            <div class="col-md-4"><div class="card bg-success text-white text-center p-3"><h3>{{ in_stock }}</h3><p>In Stock</p></div></div>
-            <div class="col-md-4"><div class="card bg-warning text-dark text-center p-3"><h3>{{ out_stock }}</h3><p>On Demo</p></div></div>
+        <div class="row g-3 mb-4">
+            <div class="col-md-4">
+                <div class="card text-white bg-primary h-100">
+                    <div class="card-body text-center">
+                        <h3>{{ total }}</h3>
+                        <p class="mb-0">Total Assets</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-white bg-success h-100">
+                    <div class="card-body text-center">
+                        <h3>{{ in_stock }}</h3>
+                        <p class="mb-0">In Stock</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card text-white bg-warning h-100">
+                    <div class="card-body text-center">
+                        <h3 class="text-dark">{{ out_stock }}</h3>
+                        <p class="text-dark mb-0">On Demo</p>
+                    </div>
+                </div>
+            </div>
         </div>
-
-        <div class="card mt-4">
+        
+        <div class="card">
             <div class="card-header bg-secondary text-white">Add Asset</div>
             <div class="card-body">
-                <form action="/add" method="POST" class="row g-3">
-                    <div class="col-5"><input type="text" name="description" class="form-control" placeholder="Description" required></div>
-                    <div class="col-5"><input type="text" name="serial_number" class="form-control" placeholder="Serial #" required></div>
-                    <div class="col-2"><button type="submit" class="btn btn-dark w-100">Add</button></div>
+                <form action="/add" method="POST" class="row g-3 align-items-center">
+                    <div class="col-md-5">
+                        <input type="text" name="description" class="form-control" placeholder="Description" required>
+                    </div>
+                    <div class="col-md-5">
+                        <input type="text" name="serial_number" class="form-control" placeholder="Serial #" required>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-dark w-100">Add</button>
+                    </div>
                 </form>
             </div>
         </div>
     </div>
+
     <div class="col-md-4">
-        <div class="card h-100 p-2"><canvas id="statusChart"></canvas></div>
+        <div class="card h-100">
+            <div class="card-header">Status Overview</div>
+            <div class="card-body" style="height: 300px; position: relative;">
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -29,29 +63,50 @@
     <div class="card-header">Inventory</div>
     <div class="card-body">
         <table class="table table-striped align-middle">
-            <thead><tr><th>Serial</th><th>Item</th><th>Status</th><th>Location</th><th>Action</th></tr></thead>
+            <thead>
+                <tr>
+                    <th>Serial</th>
+                    <th>Item</th>
+                    <th>Status</th>
+                    <th>Location</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
             <tbody>
                 {% for asset in assets %}
                 <tr>
                     <td>{{ asset.serial_number }}</td>
                     <td>{{ asset.description }}</td>
-                    <td><span class="badge bg-{{ 'success' if asset.status == 'In' else 'warning text-dark' }}">{{ asset.status }}</span></td>
+                    <td>
+                        {% if asset.status == 'In' %}
+                            <span class="badge bg-success">In</span>
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Out</span>
+                        {% endif %}
+                    </td>
                     <td>{{ asset.location }}</td>
                     <td>
                         {% if asset.status == 'In' %}
                             <button class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#m{{ loop.index }}">Send Out</button>
+                            
                             <div class="modal fade" id="m{{ loop.index }}" tabindex="-1">
                                 <div class="modal-dialog">
                                     <form class="modal-content" action="/update_status/{{ asset._id }}" method="POST">
-                                        <div class="modal-header"><h5 class="modal-title">Select Location</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Where is it going?</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
                                         <div class="modal-body">
                                             <input type="hidden" name="action" value="checkout">
                                             <input type="text" name="location" class="form-control" placeholder="Enter Hospital Name" required>
                                         </div>
-                                        <div class="modal-footer"><button type="submit" class="btn btn-primary">Confirm</button></div>
+                                        <div class="modal-footer">
+                                            <button type="submit" class="btn btn-primary">Confirm</button>
+                                        </div>
                                     </form>
                                 </div>
                             </div>
+
                         {% else %}
                             <form action="/update_status/{{ asset._id }}" method="POST" style="display:inline;">
                                 <input type="hidden" name="action" value="checkin">
@@ -68,9 +123,28 @@
 </div>
 
 <script>
-    new Chart(document.getElementById('statusChart'), {
-        type: 'doughnut',
-        data: { labels: ['In', 'Out'], datasets: [{ data: [{ in_stock }, { out_stock }], backgroundColor: ['#198754', '#ffc107'] }] }
+    document.addEventListener("DOMContentLoaded", function() {
+        const ctx = document.getElementById('statusChart');
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['In Stock', 'On Demo'],
+                    datasets: [{
+                        data: [{{ in_stock }}, {{ out_stock }}],
+                        backgroundColor: ['#198754', '#ffc107']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false, // This allows the chart to fill the height
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+        }
     });
 </script>
+
 {% endblock %}
