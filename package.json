@@ -1,0 +1,15 @@
+{
+  "name": "asset-management-app",
+  "version": "1.0.0",
+  "description": "A modern asset management system built with React and Flask, deployed as a monorepo on Vercel.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build"
+  }
+}
