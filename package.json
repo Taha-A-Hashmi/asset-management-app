@@ -8,8 +8,5 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "scripts": {
-    "build": "cd frontend && npm install && npm run build"
-  }
+  "license": "ISC"
 }
