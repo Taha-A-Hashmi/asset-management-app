@@ -6,7 +6,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FRONTEND_DIST = os.path.join(BASE_DIR, '../frontend/dist')
+FRONTEND_DIST = os.path.join(BASE_DIR, '../public')
 
 app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path='')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
