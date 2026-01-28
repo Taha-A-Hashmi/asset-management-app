@@ -5,13 +5,15 @@ from flask_cors import CORS
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
+# --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Points to ../public relative to this file
 FRONTEND_DIST = os.path.join(BASE_DIR, '../public')
 
 app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path='')
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app)
 
-# Hardcoded DB Connection
+# MongoDB Connection
 mongo_uri = "mongodb+srv://taha_admin:hospital123@cluster0.ukoxtzf.mongodb.net/hospital_crm_db?retryWrites=true&w=majority&appName=Cluster0&authSource=admin"
 client = MongoClient(mongo_uri)
 db = client['hospital_crm_db']
@@ -21,9 +23,8 @@ def serialize_asset(asset):
     asset['_id'] = str(asset['_id'])
     return asset
 
-# --- API Routes ---
+# --- API ROUTES ---
 
-# app.py (Crucial Part)
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
     try:
@@ -45,31 +46,27 @@ def get_assets():
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-        
+
 @app.route('/api/assets', methods=['POST'])
 def add_asset():
     data = request.get_json()
     new_asset = {
         'description': data.get('description'),
         'serial_number': data.get('serial_number'),
-        'status': 'Available',       # Default state: "Stock Laying in Allocation Area" or Racks
-        'location': 'Warehouse-A',   # Default Rack
-        'allocation_batch': None,
-        'created_at': datetime.datetime.utcnow() # crucial for FIFO
+        'status': 'Available',
+        'location': 'Warehouse-A',
+        'created_at': datetime.datetime.utcnow()
     }
     result = assets_collection.insert_one(new_asset)
     return jsonify(serialize_asset(assets_collection.find_one({'_id': result.inserted_id}))), 201
 
-# --- WORKFLOW IMPLEMENTATION (Based on PDF) ---
+# --- WORKFLOW ROUTES ---
 
-# STEP 1: "Marking of Lot following FIFO"
 @app.route('/api/dispatch/allocate', methods=['POST'])
 def allocate_fifo():
-    # Trigger: "Sales Order Received Through Email"
     qty = request.json.get('quantity', 1)
     allocation_number = f"ALLOC-{int(datetime.datetime.now().timestamp())}"
     
-    # FIFO Logic: Find oldest 'Available' assets
     candidates = list(assets_collection.find({'status': 'Available'}).sort('_id', 1).limit(qty))
     
     if len(candidates) < qty:
@@ -77,7 +74,6 @@ def allocate_fifo():
 
     ids = [c['_id'] for c in candidates]
     
-    # Update status to "Allocated"
     assets_collection.update_many(
         {'_id': {'$in': ids}},
         {'$set': {
@@ -86,35 +82,22 @@ def allocate_fifo():
             'location': 'Staging Area'
         }}
     )
-    
-    # Simulated Step: "Email the Allocation to AF & AW"
-    print(f"📧 EMAIL SENT: Allocation {allocation_number} sent to AF & AW.")
-    
     return jsonify({'message': f'Allocated {len(ids)} items', 'batch': allocation_number}), 200
 
-# STEP 2 & 3: Workflow Transitions
 @app.route('/api/dispatch/status', methods=['PUT'])
 def update_workflow_status():
     asset_id = request.json.get('assetId')
-    action = request.json.get('action') # pick, hold, approve, return
+    action = request.json.get('action')
     
     update_fields = {}
     
     if action == 'pick':
-        # "Picked the Allocated item Lot from Racks" -> "LOT/Qty Fulfilment in NetSuite"
         update_fields = {'status': 'Picked'}
-        print("✅ NETSUITE SYNC: Quantity Fulfilled in NetSuite.") 
-
     elif action == 'hold':
-        # Path: "DO/INV Not Receive, HOLD"
         update_fields = {'status': 'On Hold'}
-
     elif action == 'approve':
-        # Path: "Approved DO/INV Received" -> "Final Dispatch"
         update_fields = {'status': 'Dispatched', 'location': 'Customer Site'}
-
     elif action == 'return':
-        # Path: "Return Authorization" OR "Allocation Cancelled" -> "Stock Return to Racks"
         update_fields = {
             'status': 'Available', 
             'allocation_batch': None,
@@ -124,7 +107,8 @@ def update_workflow_status():
     assets_collection.update_one({'_id': ObjectId(asset_id)}, {'$set': update_fields})
     return jsonify({'message': 'Status updated'}), 200
 
-# --- Standard React Serve ---
+
+# --- STATIC FILE SERVING (RESTORED FOR LOCALHOST) ---
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
@@ -133,4 +117,4 @@ def serve_react(path):
     return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000)  
