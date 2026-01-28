@@ -169,7 +169,8 @@
 
     <script>
         // --- CONFIG ---
-        const API_URL = 'http://127.0.0.1:5000/api';
+        // Use relative path so it works on localhost AND Vercel
+        const API_URL = '/api';
         let chartInstance = null;
         let globalAssets = [];
 
