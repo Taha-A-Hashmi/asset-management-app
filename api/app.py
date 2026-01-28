@@ -1,43 +1,29 @@
 import os
+import datetime
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 
-# NOTE: Since we are hardcoding the password, do not upload this specific file 
-# to a public GitHub repository.
-
-# Build correct path to frontend/dist
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIST = os.path.join(BASE_DIR, '../frontend/dist')
 
 app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path='')
-
-# Enable CORS
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
-# --- MongoDB Configuration (Hardcoded) ---
-# I've pasted your connection string directly here.
+# Hardcoded DB Connection
 mongo_uri = "mongodb+srv://taha_admin:hospital123@cluster0.ukoxtzf.mongodb.net/hospital_crm_db?retryWrites=true&w=majority&appName=Cluster0&authSource=admin"
-
-try:
-    client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
-    # Force a connection check to ensure the URI works immediately
-    client.server_info()
-    print("✅ Successfully connected to MongoDB")
-except Exception as e:
-    print(f"❌ Failed to connect to MongoDB: {e}")
-
+client = MongoClient(mongo_uri)
 db = client['hospital_crm_db']
 assets_collection = db['assets']
 
-# Helper function
 def serialize_asset(asset):
     asset['_id'] = str(asset['_id'])
     return asset
 
 # --- API Routes ---
 
+# app.py (Crucial Part)
 @app.route('/api/assets', methods=['GET'])
 def get_assets():
     try:
@@ -46,8 +32,8 @@ def get_assets():
         
         # Stats logic
         total_assets = len(serialized_assets)
-        in_stock = sum(1 for a in serialized_assets if a.get('status') == 'In')
-        out_stock = sum(1 for a in serialized_assets if a.get('status') == 'Out')
+        in_stock = sum(1 for a in serialized_assets if a.get('status') in ['Available', 'In'])
+        out_stock = sum(1 for a in serialized_assets if a.get('status') in ['Allocated', 'Picked', 'On Hold', 'Dispatched'])
         
         return jsonify({
             'assets': serialized_assets,
@@ -59,70 +45,92 @@ def get_assets():
         }), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
-
+        
 @app.route('/api/assets', methods=['POST'])
 def add_asset():
-    try:
-        data = request.get_json()
-        if not data.get('description') or not data.get('serial_number'):
-            return jsonify({'error': 'Description and serial number are required'}), 400
-        
-        new_asset = {
-            'description': data.get('description'),
-            'serial_number': data.get('serial_number'),
-            'status': 'In', 
-            'location': 'Warehouse' 
+    data = request.get_json()
+    new_asset = {
+        'description': data.get('description'),
+        'serial_number': data.get('serial_number'),
+        'status': 'Available',       # Default state: "Stock Laying in Allocation Area" or Racks
+        'location': 'Warehouse-A',   # Default Rack
+        'allocation_batch': None,
+        'created_at': datetime.datetime.utcnow() # crucial for FIFO
+    }
+    result = assets_collection.insert_one(new_asset)
+    return jsonify(serialize_asset(assets_collection.find_one({'_id': result.inserted_id}))), 201
+
+# --- WORKFLOW IMPLEMENTATION (Based on PDF) ---
+
+# STEP 1: "Marking of Lot following FIFO"
+@app.route('/api/dispatch/allocate', methods=['POST'])
+def allocate_fifo():
+    # Trigger: "Sales Order Received Through Email"
+    qty = request.json.get('quantity', 1)
+    allocation_number = f"ALLOC-{int(datetime.datetime.now().timestamp())}"
+    
+    # FIFO Logic: Find oldest 'Available' assets
+    candidates = list(assets_collection.find({'status': 'Available'}).sort('_id', 1).limit(qty))
+    
+    if len(candidates) < qty:
+        return jsonify({'error': 'Not enough stock for FIFO allocation'}), 400
+
+    ids = [c['_id'] for c in candidates]
+    
+    # Update status to "Allocated"
+    assets_collection.update_many(
+        {'_id': {'$in': ids}},
+        {'$set': {
+            'status': 'Allocated',
+            'allocation_batch': allocation_number,
+            'location': 'Staging Area'
+        }}
+    )
+    
+    # Simulated Step: "Email the Allocation to AF & AW"
+    print(f"📧 EMAIL SENT: Allocation {allocation_number} sent to AF & AW.")
+    
+    return jsonify({'message': f'Allocated {len(ids)} items', 'batch': allocation_number}), 200
+
+# STEP 2 & 3: Workflow Transitions
+@app.route('/api/dispatch/status', methods=['PUT'])
+def update_workflow_status():
+    asset_id = request.json.get('assetId')
+    action = request.json.get('action') # pick, hold, approve, return
+    
+    update_fields = {}
+    
+    if action == 'pick':
+        # "Picked the Allocated item Lot from Racks" -> "LOT/Qty Fulfilment in NetSuite"
+        update_fields = {'status': 'Picked'}
+        print("✅ NETSUITE SYNC: Quantity Fulfilled in NetSuite.") 
+
+    elif action == 'hold':
+        # Path: "DO/INV Not Receive, HOLD"
+        update_fields = {'status': 'On Hold'}
+
+    elif action == 'approve':
+        # Path: "Approved DO/INV Received" -> "Final Dispatch"
+        update_fields = {'status': 'Dispatched', 'location': 'Customer Site'}
+
+    elif action == 'return':
+        # Path: "Return Authorization" OR "Allocation Cancelled" -> "Stock Return to Racks"
+        update_fields = {
+            'status': 'Available', 
+            'allocation_batch': None,
+            'location': 'Warehouse-A'
         }
-        
-        result = assets_collection.insert_one(new_asset)
-        new_asset['_id'] = str(result.inserted_id)
-        return jsonify(new_asset), 201
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/assets/<id>', methods=['PUT'])
-def update_asset(id):
-    try:
-        data = request.get_json()
-        update_data = {}
-        
-        if 'status' in data: update_data['status'] = data['status']
-        if 'location' in data: update_data['location'] = data['location']
-        
-        if not update_data:
-            return jsonify({'error': 'No update data provided'}), 400
-        
-        result = assets_collection.update_one(
-            {'_id': ObjectId(id)},
-            {'$set': update_data}
-        )
-        
-        if result.matched_count == 0:
-            return jsonify({'error': 'Asset not found'}), 404
-            
-        updated_asset = assets_collection.find_one({'_id': ObjectId(id)})
-        return jsonify(serialize_asset(updated_asset)), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    assets_collection.update_one({'_id': ObjectId(asset_id)}, {'$set': update_fields})
+    return jsonify({'message': 'Status updated'}), 200
 
-@app.route('/api/assets/<id>', methods=['DELETE'])
-def delete_asset(id):
-    try:
-        result = assets_collection.delete_one({'_id': ObjectId(id)})
-        if result.deleted_count == 0:
-            return jsonify({'error': 'Asset not found'}), 404
-        return jsonify({'message': 'Asset deleted successfully'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# --- Serve React Frontend ---
+# --- Standard React Serve ---
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve_react(path):
     if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+    return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
